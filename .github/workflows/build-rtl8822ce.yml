@@ -181,6 +181,13 @@ jobs:
           MODULE="$(find build_dir -type f -name 'rtw88_8822ce.ko' -print -quit)"
           test -n "$MODULE"
           modinfo "$MODULE" | tee ../artifacts/metadata/rtw88-module-info.txt
+          VERMAGIC="$(modinfo -F vermagic "$MODULE")"
+          echo "Built vermagic: $VERMAGIC"
+          test "$VERMAGIC" = "6.6.90 SMP mod_unload aarch64"
+          KMOD="$(find bin -type f -name 'kmod-rtw88-8822ce_*.ipk' -print -quit)"
+          test -n "$KMOD"
+          ar p "$KMOD" control.tar.gz | tar -xzOf - ./control | tee ../artifacts/metadata/rtw88-package-control.txt
+          ar p "$KMOD" control.tar.gz | tar -xzOf - ./control | grep -F 'kernel (=6.6.90~1-r1)'
 
           {
             echo "OpenWrt commit: $OPENWRT_SHA"
