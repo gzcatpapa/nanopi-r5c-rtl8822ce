@@ -2,6 +2,9 @@ name: Build RTL8822CE for Kwrt 24.10
 
 on:
   workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/build-rtl8822ce.yml'
 
 permissions:
   contents: read
