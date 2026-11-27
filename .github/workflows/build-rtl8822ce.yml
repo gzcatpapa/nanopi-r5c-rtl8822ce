@@ -178,14 +178,9 @@ jobs:
           cd openwrt
           mkdir -p ../artifacts/packages ../artifacts/metadata
 
-          find bin -type f \\
-            \( -name 'kmod-cfg80211_*.ipk' -o -name 'kmod-mac80211_*.ipk' \\
-            -o -name 'kmod-rtw88*.ipk' -o -name 'kmod-crypto-cmac_*.ipk' \\
-            -o -name 'kmod-crypto-ccm_*.ipk' -o -name 'kmod-crypto-gcm_*.ipk' \\
-            -o -name 'kmod-rfkill_*.ipk' -o -name 'rtl8822ce-firmware_*.ipk' \\
-            -o -name 'iw_*.ipk' -o -name 'iwinfo_*.ipk' \\
-            -o -name 'wireless-regdb_*.ipk' -o -name 'hostapd-common_*.ipk' \) \\
-            -exec cp -v --parents {} ../artifacts/packages/ \\;
+          find bin -type f | grep -E '/(kmod-cfg80211|kmod-mac80211|kmod-rtw88[^/]*|kmod-crypto-cmac|kmod-crypto-ccm|kmod-crypto-gcm|kmod-rfkill|rtl8822ce-firmware|iw|iwinfo|wireless-regdb|hostapd-common)_[^/]*\\.ipk$' | while IFS= read -r pkg; do
+            cp -v --parents "$pkg" ../artifacts/packages/
+          done
 
           MODULE="$(find build_dir -type f -name 'rtw88_8822ce.ko' -print -quit)"
           test -n "$MODULE"
