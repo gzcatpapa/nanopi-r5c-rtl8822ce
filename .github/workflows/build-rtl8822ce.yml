@@ -1,0 +1,203 @@
+name: Build RTL8822CE for Kwrt 24.10
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    steps:
+      - name: Checkout build scripts
+        uses: actions/checkout@v4
+
+      - name: Free runner disk space
+        uses: coder-xiaomo/free-disk-space@main
+        with:
+          tool-cache: false
+          android: true
+          dotnet: true
+          haskell: true
+          large-packages: true
+          docker-images: true
+          swap-storage: true
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential clang flex bison g++ gawk gettext git             libncurses-dev libssl-dev python3-setuptools rsync swig unzip zlib1g-dev             file wget python3-pyelftools libpython3-dev aria2 jq ccache rename             libelf-dev device-tree-compiler libgmp-dev libmpc-dev libfuse-dev             kmod bc time
+
+      - name: Fetch date-aligned source revisions
+        shell: bash
+        run: |
+          set -euxo pipefail
+          OPENWRT_SHA=65906202fccc45adb77f4879fd8d36be6d7578b3
+          LEDE_SHA=2b23abbb6bcb2f7c6ce76407cf89afd90a83b057
+          KWRT_SHA=f35c271b2759b7111fd123c1975f1d19b73a2760
+
+          git clone --filter=blob:none https://github.com/openwrt/openwrt.git openwrt
+          git -C openwrt checkout "$OPENWRT_SHA"
+
+          git clone --filter=blob:none https://github.com/coolsnowwolf/lede.git lede
+          git -C lede checkout "$LEDE_SHA"
+
+          git clone --filter=blob:none https://github.com/kiddin9/Kwrt.git kwrt
+          git -C kwrt checkout "$KWRT_SHA"
+
+          echo "OPENWRT_SHA=$OPENWRT_SHA" >> "$GITHUB_ENV"
+          echo "LEDE_SHA=$LEDE_SHA" >> "$GITHUB_ENV"
+          echo "KWRT_SHA=$KWRT_SHA" >> "$GITHUB_ENV"
+
+      - name: Reconstruct Kwrt Rockchip 6.6.90 source tree
+        shell: bash
+        run: |
+          set -euxo pipefail
+
+          cd openwrt
+          rm -rf target/linux/rockchip target/linux/generic package/boot
+          cp -a ../lede/target/linux/rockchip target/linux/
+          cp -a ../lede/target/linux/generic target/linux/
+          cp -a ../lede/package/boot package/
+          cp -f ../lede/include/kernel-6.6 include/kernel-6.6
+          cp -f ../lede/include/trusted-firmware-a.mk include/trusted-firmware-a.mk
+
+          # Kwrt's Rockchip build restores this Makefile from OpenWrt 24.10.
+          curl -fsSL "https://raw.githubusercontent.com/openwrt/openwrt/$OPENWRT_SHA/target/linux/rockchip/Makefile" \
+            -o target/linux/rockchip/Makefile
+
+          # Reproduce the Rockchip-specific overlays and kernel config changes.
+          cp -a ../kwrt/devices/rockchip_armv8/diy/. ./
+          sed -i -e 's,kmod-r8168,kmod-r8169,g' target/linux/rockchip/image/armv8.mk
+          sed -i -e 's,wpad-openssl,wpad-basic-mbedtls,g' target/linux/rockchip/image/armv8.mk
+          sed -i 's/DEFAULT_PACKAGES +=/DEFAULT_PACKAGES += fdisk lsblk kmod-drm-rockchip/' target/linux/rockchip/Makefile
+          sed -i 's/Ariaboard/光影猫/' target/linux/rockchip/image/armv8.mk
+          printf '\nCONFIG_SENSORS_PWM_FAN=y\n' >> target/linux/rockchip/armv8/config-6.6
+          sed -i "/KernelPackage,ptp/d" package/kernel/linux/modules/other.mk
+
+          # Reproduce Kwrt's kernel module build behavior and .vermagic override.
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path("include/kernel-defaults.mk")
+          s = p.read_text()
+          old = "\tgrep '=[ym]' $(LINUX_DIR)/.config.set | LC_ALL=C sort | $(MKHASH) md5 > $(LINUX_DIR)/.vermagic"
+          if old not in s:
+              raise SystemExit("Could not find the expected OpenWrt .vermagic line")
+          p.write_text(s.replace(old, "\techo '1' > $(LINUX_DIR)/.vermagic"))
+          PY
+
+          # Apply the two common patches that affect kernel build/version handling.
+          git apply ../kwrt/devices/common/patches/LINUX_VERSION.patch
+          git apply ../kwrt/devices/common/patches/kernel-defaults.patch
+
+          # Apply the Rockchip patch set used by the historical Kwrt workflow.
+          git apply ../kwrt/devices/rockchip_armv8/patches/Photonicat_wireless.patch
+          git apply ../kwrt/devices/rockchip_armv8/patches/fix.patch
+          git apply ../kwrt/devices/rockchip_armv8/patches/nanopi-zero2.patch
+
+          # Kwrt adds these generic kernel options during defconfig preparation.
+          cat >> target/linux/generic/config-6.6 <<'EOF'
+          CONFIG_CPU_FREQ_GOV_POWERSAVE=y
+          CONFIG_CPU_FREQ_GOV_USERSPACE=y
+          CONFIG_CPU_FREQ_GOV_ONDEMAND=y
+          CONFIG_CPU_FREQ_GOV_CONSERVATIVE=y
+          CONFIG_CRYPTO_CHACHA20_NEON=y
+          CONFIG_CRYPTO_CHACHA20POLY1305=y
+          CONFIG_FAT_DEFAULT_IOCHARSET="utf8"
+          CONFIG_NLS_CODEPAGE_437=y
+          CONFIG_NLS_ISO8859_1=y
+          EOF
+
+          # Start from the actual Kwrt common + Rockchip configuration.
+          cp ../kwrt/devices/common/.config .config
+          cat ../kwrt/devices/rockchip_armv8/.config >> .config
+
+          # Add only the RTL8822CE driver stack and its firmware.
+          cat >> .config <<'EOF'
+          CONFIG_PACKAGE_kmod-cfg80211=m
+          CONFIG_PACKAGE_kmod-mac80211=m
+          CONFIG_PACKAGE_kmod-rtw88=m
+          CONFIG_PACKAGE_kmod-rtw88-pci=m
+          CONFIG_PACKAGE_kmod-rtw88-8822c=m
+          CONFIG_PACKAGE_kmod-rtw88-8822ce=m
+          CONFIG_PACKAGE_rtl8822ce-firmware=y
+          EOF
+
+          echo "=== Historical kernel version ==="
+          cat include/kernel-6.6
+          echo "=== Source revisions ==="
+          git -C .. -C openwrt rev-parse HEAD || true
+
+      - name: Configure and verify driver selection
+        shell: bash
+        run: |
+          set -euxo pipefail
+          cd openwrt
+          make defconfig
+          grep -E '^CONFIG_PACKAGE_(kmod-(cfg80211|mac80211|rtw88.*)|rtl8822ce-firmware)=' .config
+          grep -E '^CONFIG_(TARGET_rockchip|TARGET_rockchip_armv8|KERNEL_MODVERSIONS|KERNEL_MODULES|KERNEL_DEBUG_INFO|KERNEL_DEBUG_INFO_BTF)=' .config || true
+
+      - name: Build matching kernel and kernel packages
+        shell: bash
+        run: |
+          set -euxo pipefail
+          cd openwrt
+          JOBS=2
+          make target/linux/compile -j"$JOBS" V=s
+          make package/kernel/linux/compile -j"$JOBS" V=s
+          make package/kernel/mac80211/compile -j"$JOBS" V=s
+          make package/firmware/linux-firmware/compile -j"$JOBS" V=s
+          make package/firmware/wireless-regdb/compile -j"$JOBS" V=s
+          make package/network/utils/iw/compile -j"$JOBS" V=s
+          make package/network/utils/iwinfo/compile -j"$JOBS" V=s
+          make package/network/services/hostapd/compile -j"$JOBS" V=s
+
+      - name: Verify ABI and collect packages
+        shell: bash
+        run: |
+          set -euxo pipefail
+          cd openwrt
+          mkdir -p ../artifacts/packages ../artifacts/metadata
+
+          find bin -type f \\
+            \( -name 'kmod-cfg80211_*.ipk' -o -name 'kmod-mac80211_*.ipk' \\
+            -o -name 'kmod-rtw88*.ipk' -o -name 'kmod-crypto-cmac_*.ipk' \\
+            -o -name 'kmod-crypto-ccm_*.ipk' -o -name 'kmod-crypto-gcm_*.ipk' \\
+            -o -name 'kmod-rfkill_*.ipk' -o -name 'rtl8822ce-firmware_*.ipk' \\
+            -o -name 'iw_*.ipk' -o -name 'iwinfo_*.ipk' \\
+            -o -name 'wireless-regdb_*.ipk' -o -name 'hostapd-common_*.ipk' \) \\
+            -exec cp -v --parents {} ../artifacts/packages/ \\;
+
+          find build_dir -type f -name 'rtw88_8822ce.ko' -print -exec modinfo {} \; \
+            | tee ../artifacts/metadata/rtw88-module-info.txt
+
+          {
+            echo "OpenWrt commit: $OPENWRT_SHA"
+            echo "LEDE commit: $LEDE_SHA"
+            echo "Kwrt commit: $KWRT_SHA"
+            echo
+            echo "Kernel version source:"
+            cat include/kernel-6.6
+            echo
+            echo "Selected package config:"
+            grep -E '^CONFIG_PACKAGE_(kmod-(cfg80211|mac80211|rtw88.*)|rtl8822ce-firmware)=' .config
+            echo
+            echo "Kernel build config:"
+            find build_dir -type f -path '*/linux-6.6.90/.config' -exec grep -E '^(CONFIG_MODVERSIONS|CONFIG_MODULES|CONFIG_LOCALVERSION|CONFIG_WLAN)=' {} \; || true
+            echo
+            echo "Kernel Module.symvers:"
+            find build_dir -type f -name Module.symvers -print
+          } | tee ../artifacts/metadata/build-summary.txt
+
+          find ../artifacts/packages -name '*.ipk' -print | sort > ../artifacts/metadata/package-list.txt
+          test -s ../artifacts/metadata/package-list.txt
+
+      - name: Upload RTL8822CE packages and ABI evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: kwrt-rtl8822ce-6.6.90-candidate
+          path: artifacts/
+          if-no-files-found: error
+          retention-days: 30
