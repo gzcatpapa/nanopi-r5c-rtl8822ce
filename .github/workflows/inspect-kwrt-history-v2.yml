@@ -1,4 +1,4 @@
-name: Inspect Kwrt historical build
+name: Inspect Kwrt historical build (v2)
 
 on:
   workflow_dispatch:
