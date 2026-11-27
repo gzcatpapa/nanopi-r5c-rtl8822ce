@@ -1,0 +1,1 @@
+# nanopi-r5c-rtl8822ce
