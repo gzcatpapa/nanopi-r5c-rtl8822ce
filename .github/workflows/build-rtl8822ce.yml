@@ -178,8 +178,9 @@ jobs:
             -o -name 'wireless-regdb_*.ipk' -o -name 'hostapd-common_*.ipk' \) \\
             -exec cp -v --parents {} ../artifacts/packages/ \\;
 
-          find build_dir -type f -name 'rtw88_8822ce.ko' -print -exec modinfo {} \; \
-            | tee ../artifacts/metadata/rtw88-module-info.txt
+          MODULE="$(find build_dir -type f -name 'rtw88_8822ce.ko' -print -quit)"
+          test -n "$MODULE"
+          modinfo "$MODULE" | tee ../artifacts/metadata/rtw88-module-info.txt
 
           {
             echo "OpenWrt commit: $OPENWRT_SHA"
