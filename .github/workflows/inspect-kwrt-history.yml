@@ -1,0 +1,31 @@
+name: Inspect Kwrt historical build
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Inspect Kwrt history around the installed firmware date
+        shell: bash
+        run: |
+          set -euxo pipefail
+          git clone --filter=blob:none --no-checkout https://github.com/kiddin9/Kwrt.git kwrt
+          cd kwrt
+          echo "=== Commits touching Rockchip config up to 2025-05-16 ==="
+          git log --all --format='%H %cI %s' --until='2025-05-16 23:59:59 +0000' -n 12 -- devices/rockchip_armv8/.config devices/rockchip_armv8/diy.sh .github/workflows/Openwrt-AutoBuild.yml
+          echo "=== Latest commit at or before 2025-05-16 ==="
+          REV="$(git rev-list -n 1 --before='2025-05-16 23:59:59 +0000' origin/master)"
+          echo "REV=$REV"
+          git show -s --format=fuller "$REV"
+          echo "=== Historical Rockchip DIY script ==="
+          git show "$REV:devices/rockchip_armv8/diy.sh" || true
+          echo "=== Historical Rockchip config ==="
+          git show "$REV:devices/rockchip_armv8/.config" || true
+          echo "=== Historical build workflow kernel/source selection ==="
+          git show "$REV:.github/workflows/Openwrt-AutoBuild.yml" | grep -n -E 'KERNEL|kernel|LEDE|coolsnowwolf|checkout|branch|openwrt' | head -100 || true
