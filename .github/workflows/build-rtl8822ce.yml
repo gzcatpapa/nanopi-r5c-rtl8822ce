@@ -122,13 +122,21 @@ jobs:
           CONFIG_PACKAGE_kmod-rtw88-pci=m
           CONFIG_PACKAGE_kmod-rtw88-8822c=m
           CONFIG_PACKAGE_kmod-rtw88-8822ce=m
+          CONFIG_PACKAGE_kmod-rfkill=m
+          CONFIG_PACKAGE_kmod-crypto-cmac=m
+          CONFIG_PACKAGE_kmod-crypto-ccm=m
+          CONFIG_PACKAGE_kmod-crypto-gcm=m
+          CONFIG_PACKAGE_iw=y
+          CONFIG_PACKAGE_iwinfo=y
+          CONFIG_PACKAGE_wireless-regdb=y
+          CONFIG_PACKAGE_hostapd-common=y
           CONFIG_PACKAGE_rtl8822ce-firmware=y
           EOF
 
           echo "=== Historical kernel version ==="
           cat include/kernel-6.6
           echo "=== Source revisions ==="
-          git -C .. -C openwrt rev-parse HEAD || true
+          git rev-parse HEAD
 
       - name: Configure and verify driver selection
         shell: bash
