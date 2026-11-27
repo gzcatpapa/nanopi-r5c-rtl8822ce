@@ -153,6 +153,9 @@ jobs:
           set -euxo pipefail
           cd openwrt
           JOBS=2
+          # Build OpenWrt host utilities first; kernel configuration invokes
+          # staged host tools such as m4 through staging_dir/host/bin.
+          make tools/install -j"$JOBS" V=s
           make target/linux/compile -j"$JOBS" V=s
           make package/kernel/linux/compile -j"$JOBS" V=s
           make package/kernel/mac80211/compile -j"$JOBS" V=s
